@@ -1,0 +1,279 @@
+diff --git a/arch/x86/kvm/vmx.c b/arch/x86/kvm/vmx.c
+index 259e9b2..92caca5 100644
+--- a/arch/x86/kvm/vmx.c
++++ b/arch/x86/kvm/vmx.c
+@@ -55,10 +55,21 @@
+ #define __ex(x) __kvm_handle_fault_on_reboot(x)
+ #define __ex_clear(x, reg) \
+ 	____kvm_handle_fault_on_reboot(x, "xor " reg " , " reg)
++#define SIZE 67
+ 
+ MODULE_AUTHOR("Qumranet");
+ MODULE_LICENSE("GPL");
+ 
++static struct my_exit {
++	u64 max;
++	u64 min;
++	u64 exits;
++	u64 cycles;
++}my_exits[SIZE];
++
++static u64 total_exits = 0;
++static u64 total_cpu_cycles = 0;
++
+ static const struct x86_cpu_id vmx_cpu_id[] = {
+ 	X86_FEATURE_MATCH(X86_FEATURE_VMX),
+ 	{}
+@@ -8425,6 +8436,162 @@ static void dump_vmcs(void)
+ 		       vmcs_read16(VIRTUAL_PROCESSOR_ID));
+ }
+ 
++static void initiate_exit_values(void){
++	int i = 0;
++	//Initialize the structs to zeros
++    for(i = 0; i < SIZE; i++)
++	{
++		(my_exits[i]).max = 0;
++		(my_exits[i]).min = 0;
++		(my_exits[i]).exits = 0;
++		(my_exits[i]).cycles = 0;
++	}
++
++}
++
++static void print_name(u32 i){
++
++	switch (i) {
++		case EXIT_REASON_EXCEPTION_NMI:
++			printk("EXCEPTION NMI" );
++			break;
++		case EXIT_REASON_EXTERNAL_INTERRUPT:
++			printk("EXTERNAL INTERRUPT" );
++			break;
++		case EXIT_REASON_TRIPLE_FAULT:
++			printk("TRIPLE_FAULT");
++			break;
++		case EXIT_REASON_NMI_WINDOW:
++			printk("NMI WINDOW" );
++			break;
++		case EXIT_REASON_IO_INSTRUCTION:
++			printk("IO INSTRUCTION");
++			break;
++		case EXIT_REASON_CR_ACCESS:
++			printk("CR ACCESS");
++			break;
++		case EXIT_REASON_DR_ACCESS:
++			printk("DR ACCESS");
++			break;
++		case EXIT_REASON_CPUID:
++			printk("CPUID");
++			break;
++		case EXIT_REASON_MSR_READ:
++			printk("MSR READ");
++			break;
++		case EXIT_REASON_MSR_WRITE:
++			printk("MSR WRITE" );
++			break;
++		case EXIT_REASON_PENDING_INTERRUPT:
++			printk("PENDING INTERRUPT");
++			break;
++		case EXIT_REASON_HLT:
++			printk("REASON HLT");
++			break;
++		case EXIT_REASON_INVD:
++			printk("REASON INVD" );
++			break;
++		case EXIT_REASON_INVLPG:
++			printk("INVLPG" );
++			break;
++		case EXIT_REASON_RDPMC:
++			printk("RDPMC");
++			break;
++		case EXIT_REASON_VMCALL:
++			printk("VMCALL");
++			break;
++		case EXIT_REASON_VMCLEAR:
++			printk("VMCLEAR");
++			break;
++		case EXIT_REASON_VMLAUNCH:
++			printk("VMLAUNCH");
++			break;
++		case EXIT_REASON_VMPTRLD:
++			printk("VMPTRLD");
++			break;
++		case EXIT_REASON_VMPTRST:
++			printk("VMPTRST");
++			break;
++		case EXIT_REASON_VMREAD:
++			printk("EXIT REASON VMREAD");
++			break;
++		case EXIT_REASON_VMRESUME:
++			printk("VMRESUME");
++			break;
++		case EXIT_REASON_VMWRITE:
++			printk("VMWRITE" );
++			break;
++		case EXIT_REASON_VMOFF:
++			printk("VMOFF");
++			break;
++		case EXIT_REASON_VMON:
++			printk("VMON" );
++			break;
++		case EXIT_REASON_TPR_BELOW_THRESHOLD:
++			printk("TPR BELOW THRESHOLD" );
++			break;
++		case EXIT_REASON_APIC_ACCESS:
++			printk("APIC ACCESS");
++			break;
++		case EXIT_REASON_APIC_WRITE:
++			printk("APIC WRITE");
++			break;
++		case EXIT_REASON_EOI_INDUCED:
++			printk("EOI INDUCED");
++			break;
++		case EXIT_REASON_WBINVD:
++			printk("WBINVD");
++			break;
++		case EXIT_REASON_XSETBV:
++			printk("XSETBV");
++			break;
++		case EXIT_REASON_TASK_SWITCH:
++			printk("TASK SWITCH");
++			break;
++		case EXIT_REASON_MCE_DURING_VMENTRY:
++			printk("MCE DURING VMENTRY");
++			break;
++		case EXIT_REASON_EPT_VIOLATION:
++			printk("EPT VIOLATION");
++			break;
++		case EXIT_REASON_EPT_MISCONFIG:
++			printk("EPT MISCONFIG");
++			break;
++		case EXIT_REASON_PAUSE_INSTRUCTION:
++			printk("PAUSE INSTRUCTION");
++			break;
++		case EXIT_REASON_MWAIT_INSTRUCTION:
++			printk("MWAIT INSTRUCTION");
++			break;
++		case EXIT_REASON_MONITOR_TRAP_FLAG:
++			printk("MONITOR TRAP FLAG");
++			break;
++		case EXIT_REASON_MONITOR_INSTRUCTION:
++			printk("MONITOR INSTRUCTION");
++			break;
++		case EXIT_REASON_INVEPT:
++			printk("INVEPT");
++			break;
++		case EXIT_REASON_INVVPID:
++			printk("INVVPID");
++			break;
++		case EXIT_REASON_XSAVES:
++			printk("XSAVES");
++			break;
++		case EXIT_REASON_XRSTORS:
++			printk("XRSTORS");
++			break;
++		case EXIT_REASON_PML_FULL:
++			printk("PML FULL");
++			break;
++		case EXIT_REASON_PREEMPTION_TIMER:
++			printk("PREEMPTION TIMER");
++			break;
++		default:
++			break;
++	}
++}
++
+ /*
+  * The guest has exited.  See if we can fix it or if we need userspace
+  * assistance.
+@@ -8434,6 +8601,17 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
+ 	struct vcpu_vmx *vmx = to_vmx(vcpu);
+ 	u32 exit_reason = vmx->exit_reason;
+ 	u32 vectoring_info = vmx->idt_vectoring_info;
++	u64 before_exit = 0;
++	u64 after_exit = 0;
++	u64 this_exit_cycles = 0;
++	u32 handle_return_value = 0;
++	u64 average = 0;
++	int i = 0;
++
++	if(total_exits == 0){
++		initiate_exit_values();
++	}
++
+ 
+ 	trace_kvm_exit(exit_reason, vcpu, KVM_ISA_VMX);
+ 	vcpu->arch.gpa_available = false;
+@@ -8516,7 +8694,70 @@ static int vmx_handle_exit(struct kvm_vcpu *vcpu)
+ 
+ 	if (exit_reason < kvm_vmx_max_exit_handlers
+ 	    && kvm_vmx_exit_handlers[exit_reason])
+-		return kvm_vmx_exit_handlers[exit_reason](vcpu);
++		{
++			total_exits = total_exits+1;
++			before_exit = rdtsc();
++			handle_return_value = kvm_vmx_exit_handlers[exit_reason](vcpu);
++			after_exit = rdtsc();
++			this_exit_cycles = after_exit-before_exit;
++			total_cpu_cycles = total_cpu_cycles + this_exit_cycles;
++
++			//Increment number of exits for current exit
++			my_exits[exit_reason].exits = my_exits[exit_reason].exits+1;
++
++			//Increment cycles for current exit
++			my_exits[exit_reason].cycles = my_exits[exit_reason].cycles + this_exit_cycles;
++
++			//Update min
++			if(my_exits[exit_reason].min <= 0){
++				my_exits[exit_reason].min = this_exit_cycles;
++			}
++			else if(my_exits[exit_reason].min > 0){
++				if(this_exit_cycles < my_exits[exit_reason].min){
++					my_exits[exit_reason].min = this_exit_cycles;
++				}
++			}
++
++			//Update max
++			if( this_exit_cycles > my_exits[exit_reason].max){
++				my_exits[exit_reason].max = this_exit_cycles;
++			}
++
++			//Check if total exits are a mod of 500
++			if(total_exits%500==0)
++			{
++				printk("------------------------------------------------------------------------------"
++				"-------------------------------------------------------------------------------------");
++				printk("500 exits done!");
++				printk("Showing Data!");
++				printk("------------------------------------------------------------------------------"
++				"-------------------------------------------------------------------------------------");
++				printk("|Total Exits\t|Total CPU Cycles\t|Max CPU Cycles\t|Min CPU Cycles\t|Average CPU Cycles\t|");
++				printk("------------------------------------------------------------------------------"
++				"-------------------------------------------------------------------------------------");
++				for(i=0;i<SIZE;i++)
++				{
++				if(my_exits[i].exits!=0)
++					{
++						average = (my_exits[i].cycles)/(my_exits[i].exits);
++						print_name(i);
++						printk("%15llu|%15llu|%15llu|%15llu|%15llu|",
++							my_exits[i].exits,
++							my_exits[i].cycles,
++							my_exits[i].max,
++							my_exits[i].min,
++							average
++							);
++					}
++				}
++				printk("All exits till now %llu", total_exits);
++				printk("Total CPU CYCLES for all %llu", total_cpu_cycles);
++				printk("------------------------------------------------------------------------------"
++				"-------------------------------------------------------------------------------------");
++			}
++		
++			return handle_return_value;
++		}
+ 	else {
+ 		vcpu_unimpl(vcpu, "vmx: unexpected exit reason 0x%x\n",
+ 				exit_reason);

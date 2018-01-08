@@ -1,0 +1,36 @@
+diff --git a/arch/x86/kvm/cpuid.c b/arch/x86/kvm/cpuid.c
+old mode 100644
+new mode 100755
+index efde6cc..38e45e4
+--- a/arch/x86/kvm/cpuid.c
++++ b/arch/x86/kvm/cpuid.c
+@@ -27,6 +27,8 @@
+ #include "trace.h"
+ #include "pmu.h"
+ 
++int flag = 0;
++
+ static u32 xstate_required_size(u64 xstate_bv, bool compacted)
+ {
+ 	int feature_bit = 0;
+@@ -878,7 +880,19 @@ int kvm_emulate_cpuid(struct kvm_vcpu *vcpu)
+ 
+ 	eax = kvm_register_read(vcpu, VCPU_REGS_RAX);
+ 	ecx = kvm_register_read(vcpu, VCPU_REGS_RCX);
+-	kvm_cpuid(vcpu, &eax, &ebx, &ecx, &edx);
++	if(eax==0x4fffffff){
++		flag = !flag;
++		printk("Switching Flag\n");
++	}
++	else if(eax==0x0 && flag==1){
++		kvm_cpuid(vcpu, &eax, &ebx, &ecx, &edx);
++		ebx=ecx=0x45504d43;
++		edx=0x3338325f;
++		
++	}
++	else{
++		kvm_cpuid(vcpu, &eax, &ebx, &ecx, &edx);
++	}
+ 	kvm_register_write(vcpu, VCPU_REGS_RAX, eax);
+ 	kvm_register_write(vcpu, VCPU_REGS_RBX, ebx);
+ 	kvm_register_write(vcpu, VCPU_REGS_RCX, ecx);
